@@ -1,0 +1,12 @@
+# Harbordex Fork Patch Ledger
+
+This ledger records intentional patches to upstream core files.
+
+| Area                   | Files                                                                              | Reason                                                                              | Overlay Alternative                                                                        | Rebase Risk |
+| ---------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------- |
+| Branding + attribution | `README.md`, `docs/release.md`, `apps/web/*`, `apps/desktop/*`, `apps/marketing/*`, `assets/{dev,nightly,prod}/*` | Product rename to Harbordex, required fork attribution text, and replacement of legacy T3 app icons/favicons in desktop + web surfaces. | Not possible from overlay alone for all user-visible surfaces.                             | Medium      |
+| Connections parity     | `apps/web/src/components/settings/ConnectionsSettings.tsx`                         | Hide host desktop sessions from authorized-client and connected-client views so Connections focuses on paired remote clients. | Could be done in a larger overlay UI fork, but patching existing settings screen is lower risk for v2 parity. | Medium      |
+| Tracking removal       | `apps/server/src/telemetry/Layers/AnalyticsService.ts`                             | Disable PostHog/user tracking while preserving runtime analytics API compatibility. | Could be runtime config only, but code path removal prevents accidental outbound tracking. | Low         |
+| CI boundary guardrails | `.github/workflows/ci.yml`, `scripts/verify-upstream-boundary.mjs`                 | Block accidental upstream-core drift.                                               | Could be external process, but repo-native CI guard is safer.                              | Low         |
+
+Harbordex is a fork of t3code.

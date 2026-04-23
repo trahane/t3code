@@ -1,12 +1,14 @@
 # Observability
 
-T3 Code has one server-side observability model:
+Harbordex has one server-side observability model:
 
 - pretty logs go to stdout for humans
 - completed spans go to a local NDJSON trace file
 - traces and metrics can also be exported over OTLP to a real backend like Grafana LGTM
 
 The local trace file is the persisted source of truth. There is no separate persisted server log file anymore.
+
+Compatibility note: v2.0 keeps existing CLI/env names for upstream safety, so commands still use `t3` and observability env vars still use the `T3CODE_*` prefix.
 
 ## Where To Find Things
 
@@ -22,7 +24,7 @@ If you want a log message to show up in the trace file, emit it inside an active
 
 ### Traces
 
-Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.t3/userdata/logs/server.trace.ndjson`).
+Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.harbordex/userdata/logs/server.trace.ndjson`).
 
 Important fields in each record:
 
@@ -101,7 +103,7 @@ Default Grafana login:
 ```bash
 export T3CODE_OTLP_TRACES_URL=http://localhost:4318/v1/traces
 export T3CODE_OTLP_METRICS_URL=http://localhost:4318/v1/metrics
-export T3CODE_OTLP_SERVICE_NAME=t3-local
+export T3CODE_OTLP_SERVICE_NAME=harbordex-local
 ```
 
 Optional:
@@ -140,8 +142,8 @@ macOS app bundle example:
 ```bash
 T3CODE_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 T3CODE_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
-T3CODE_OTLP_SERVICE_NAME=t3-desktop \
-"/Applications/T3 Code.app/Contents/MacOS/T3 Code"
+T3CODE_OTLP_SERVICE_NAME=harbordex-desktop \
+"/Applications/Harbordex.app/Contents/MacOS/Harbordex"
 ```
 
 Direct binary example:
@@ -149,7 +151,7 @@ Direct binary example:
 ```bash
 T3CODE_OTLP_TRACES_URL=http://localhost:4318/v1/traces \
 T3CODE_OTLP_METRICS_URL=http://localhost:4318/v1/metrics \
-T3CODE_OTLP_SERVICE_NAME=t3-desktop \
+T3CODE_OTLP_SERVICE_NAME=harbordex-desktop \
 ./path/to/your/desktop-app-binary
 ```
 
@@ -165,10 +167,16 @@ The backend reads observability config at process start. If you change OTLP env 
 
 The trace file is the fastest way to inspect raw span data.
 
+Set a reusable trace path:
+
+```bash
+TRACE_FILE_PATH="${T3CODE_HOME:-${HARBORDEX_HOME:-$HOME/.harbordex}}/userdata/logs/server.trace.ndjson"
+```
+
 Tail it:
 
 ```bash
-tail -f "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+tail -f "$TRACE_FILE_PATH"
 ```
 
 In monorepo dev, use:
@@ -185,7 +193,7 @@ jq -c 'select(.exit._tag != "Success") | {
   durationMs,
   exit,
   attributes
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TRACE_FILE_PATH"
 ```
 
 Show slow spans:
@@ -196,7 +204,7 @@ jq -c 'select(.durationMs > 1000) | {
   durationMs,
   traceId,
   spanId
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TRACE_FILE_PATH"
 ```
 
 Inspect embedded log events:
@@ -213,7 +221,7 @@ jq -c 'select(any(.events[]?; .attributes["effect.logLevel"] != null)) | {
         level: .attributes["effect.logLevel"]
       }
   ]
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TRACE_FILE_PATH"
 ```
 
 Follow one trace:
@@ -224,7 +232,7 @@ jq -r 'select(.traceId == "TRACE_ID_HERE") | [
   .spanId,
   (.parentSpanId // "-"),
   .durationMs
-] | @tsv' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+] | @tsv' "$TRACE_FILE_PATH"
 ```
 
 Filter orchestration commands:
@@ -235,7 +243,7 @@ jq -c 'select(.attributes["orchestration.command_type"] != null) | {
   durationMs,
   commandType: .attributes["orchestration.command_type"],
   aggregateKind: .attributes["orchestration.aggregate_kind"]
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TRACE_FILE_PATH"
 ```
 
 Filter git activity:
@@ -250,7 +258,7 @@ jq -c 'select(.attributes["git.operation"] != null) | {
     .events[]
     | select(.name == "git.hook.started" or .name == "git.hook.finished")
   ]
-}' "$T3CODE_HOME/userdata/logs/server.trace.ndjson"
+}' "$TRACE_FILE_PATH"
 ```
 
 ### Use Tempo When You Need A Real Trace Viewer
@@ -272,7 +280,7 @@ Recommended flow in Grafana:
 
 Good first searches:
 
-- service name such as `t3-local`, `t3-dev`, or `t3-desktop`
+- service name such as `harbordex-local`, `harbordex-dev`, or `harbordex-desktop`
 - span names like `sql.execute`, `git.runCommand`, `provider.sendTurn`
 - orchestration spans with attributes like `orchestration.command_type`
 

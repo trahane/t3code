@@ -121,7 +121,7 @@ export function createWsRpcProtocolLayer(
       socket.addEventListener(
         "error",
         () => {
-          lifecycle.onError("Unable to connect to the T3 server WebSocket.");
+          lifecycle.onError("Unable to connect to the Harbordex server WebSocket.");
         },
         { once: true },
       );

@@ -142,6 +142,36 @@ export interface DesktopServerExposureState {
   advertisedHost: string | null;
 }
 
+export interface DesktopRuntimeStatus {
+  backendRunning: boolean;
+  backendProcessId: number | null;
+  localHttpUrl: string | null;
+  localWsUrl: string | null;
+  exposureMode: DesktopServerExposureMode;
+  exposureEndpointUrl: string | null;
+  exposureAdvertisedHost: string | null;
+}
+
+export interface DesktopTailscaleDiagnostics {
+  available: boolean;
+  version: string | null;
+  backendState: string | null;
+  ip: string | null;
+  hostname: string | null;
+  dnsName: string | null;
+  message: string | null;
+}
+
+export interface DesktopNetworkDiagnostics {
+  generatedAt: string;
+  localHttpUrl: string | null;
+  localWsUrl: string | null;
+  exposureMode: DesktopServerExposureMode;
+  exposureEndpointUrl: string | null;
+  exposureAdvertisedHost: string | null;
+  tailscale: DesktopTailscaleDiagnostics;
+}
+
 export interface PickFolderOptions {
   initialPath?: string | null;
 }
@@ -160,6 +190,8 @@ export interface DesktopBridge {
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
+  getDesktopRuntimeStatus: () => Promise<DesktopRuntimeStatus>;
+  getDesktopNetworkDiagnostics: () => Promise<DesktopNetworkDiagnostics>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;

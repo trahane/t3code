@@ -307,6 +307,32 @@ const createDesktopBridgeStub = (overrides?: {
         endpointUrl: mode === "network-accessible" ? "http://192.168.1.44:3773" : null,
         advertisedHost: mode === "network-accessible" ? "192.168.1.44" : null,
       })),
+    getDesktopRuntimeStatus: vi.fn().mockResolvedValue({
+      backendRunning: true,
+      backendProcessId: 12345,
+      localHttpUrl: "http://127.0.0.1:3773",
+      localWsUrl: "ws://127.0.0.1:3773",
+      exposureMode: "local-only",
+      exposureEndpointUrl: null,
+      exposureAdvertisedHost: null,
+    }),
+    getDesktopNetworkDiagnostics: vi.fn().mockResolvedValue({
+      generatedAt: "2026-01-01T00:00:00.000Z",
+      localHttpUrl: "http://127.0.0.1:3773",
+      localWsUrl: "ws://127.0.0.1:3773",
+      exposureMode: "local-only",
+      exposureEndpointUrl: null,
+      exposureAdvertisedHost: null,
+      tailscale: {
+        available: false,
+        version: null,
+        backendState: null,
+        ip: null,
+        hostname: null,
+        dnsName: null,
+        message: "Tailscale CLI is unavailable on this desktop.",
+      },
+    }),
     pickFolder: vi.fn().mockResolvedValue(null),
     confirm: vi.fn().mockResolvedValue(false),
     setTheme: vi.fn().mockResolvedValue(undefined),
@@ -554,7 +580,6 @@ describe("GeneralSettingsPanel observability", () => {
 
     await expect.element(page.getByText("Authorized clients")).toBeInTheDocument();
     await expect.element(page.getByText("Revoke others")).toBeInTheDocument();
-    await expect.element(page.getByText("This Mac")).toBeInTheDocument();
     await page.getByRole("button", { name: "Create link", exact: true }).click();
     await expect.element(page.getByText("Create pairing link")).toBeInTheDocument();
     await page.getByRole("button", { name: "Create link", exact: true }).click();
@@ -647,8 +672,8 @@ describe("GeneralSettingsPanel observability", () => {
 
     await expect.element(page.getByText("Julius iPhone")).toBeInTheDocument();
     await page.getByRole("button", { name: "Revoke others", exact: true }).click();
-    await expect.element(page.getByText("This Mac")).toBeInTheDocument();
     await expect.element(page.getByText("Julius iPhone")).not.toBeInTheDocument();
+    await expect.element(page.getByText("No pairing links or client sessions.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
   });
 
@@ -669,7 +694,9 @@ describe("GeneralSettingsPanel observability", () => {
     await networkAccessToggle.click();
     await expect.element(page.getByText("Enable network access?")).toBeInTheDocument();
     await expect
-      .element(page.getByText("T3 Code will restart to expose this environment over the network."))
+      .element(
+        page.getByText("Harbordex will restart to expose this environment over the network."),
+      )
       .toBeInTheDocument();
     await page.getByRole("button", { name: "Restart and enable", exact: true }).click();
     await vi.waitFor(() => {

@@ -1,6 +1,10 @@
-# Release Checklist
+# Harbordex Release Checklist
 
 This document covers the unified release workflow for stable and nightly desktop releases.
+
+Harbordex is a fork of t3code.
+
+Compatibility note: v2.0 intentionally keeps legacy identifiers for upstream rebase safety (CLI package `t3`, command `t3`, and `T3CODE_*` env keys).
 
 ## What the workflow does
 

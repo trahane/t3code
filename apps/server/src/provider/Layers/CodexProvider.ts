@@ -10,6 +10,7 @@ import {
   Stream,
   Types,
 } from "effect";
+import { isAbsolute, resolve } from "node:path";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexSchema from "effect-codex-app-server/schema";
@@ -28,11 +29,13 @@ import { ServerSettingsError } from "@t3tools/contracts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { buildServerProvider } from "../providerSnapshot.ts";
 import { CodexProvider } from "../Services/CodexProvider.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import packageJson from "../../../package.json" with { type: "json" };
 
 const PROVIDER = "codex" as const;
 const PROVIDER_PROBE_TIMEOUT_MS = 8_000;
+const DEFAULT_CODEX_HOME = "~/.codex";
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
@@ -198,7 +201,25 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
   return models;
 });
 
-export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
+export interface ResolveCodexHomePathInput {
+  readonly homePath?: string | undefined;
+  readonly cwd?: string | undefined;
+}
+
+type CodexInitializeParams = CodexSchema.V1InitializeParams & { readonly codexHome: string };
+
+export function resolveCodexHomePath(input: ResolveCodexHomePathInput = {}): string {
+  const configuredPath = input.homePath?.trim();
+  const envPath = process.env.CODEX_HOME?.trim();
+  const rawPath = configuredPath || envPath || DEFAULT_CODEX_HOME;
+  const expandedPath = expandHomePath(rawPath);
+  return isAbsolute(expandedPath) ? expandedPath : resolve(input.cwd ?? process.cwd(), expandedPath);
+}
+
+export function buildCodexInitializeParams(
+  input: ResolveCodexHomePathInput = {},
+): CodexInitializeParams {
+  const codexHome = resolveCodexHomePath(input);
   return {
     clientInfo: {
       name: "t3code_desktop",
@@ -208,6 +229,7 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
     capabilities: {
       experimentalApi: true,
     },
+    codexHome,
   };
 }
 
@@ -217,28 +239,29 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   readonly cwd: string;
   readonly customModels?: ReadonlyArray<string>;
 }) {
+  const codexHome = resolveCodexHomePath({
+    homePath: input.homePath,
+    cwd: input.cwd,
+  });
   const clientContext = yield* Layer.build(
     CodexClient.layerCommand({
       command: input.binaryPath,
       args: ["app-server"],
       cwd: input.cwd,
-      ...(input.homePath ? { env: { CODEX_HOME: input.homePath } } : {}),
+      env: { CODEX_HOME: codexHome },
     }),
   );
   const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
     Effect.provide(clientContext),
   );
 
-  const initialize = yield* client.request("initialize", {
-    clientInfo: {
-      name: "t3code_desktop",
-      title: "T3 Code Desktop",
-      version: "0.1.0",
-    },
-    capabilities: {
-      experimentalApi: true,
-    },
-  });
+  const initialize = yield* client.request(
+    "initialize",
+    buildCodexInitializeParams({
+      homePath: codexHome,
+      cwd: input.cwd,
+    }),
+  );
   yield* client.notify("initialized", undefined);
 
   // Extract the version string after the first '/' in userAgent, up to the next space or the end

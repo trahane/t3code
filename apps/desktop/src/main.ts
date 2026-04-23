@@ -23,6 +23,8 @@ import type {
   ClientSettings,
   DesktopTheme,
   DesktopAppBranding,
+  DesktopRuntimeStatus,
+  DesktopNetworkDiagnostics,
   DesktopServerExposureMode,
   DesktopServerExposureState,
   DesktopUpdateChannel,
@@ -56,6 +58,7 @@ import {
 import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness.ts";
 import { showDesktopConfirmDialog } from "./confirmDialog.ts";
 import { resolveDesktopServerExposure } from "./serverExposure.ts";
+import { collectDesktopNetworkDiagnostics } from "./networkDiagnostics.ts";
 import { syncShellEnvironment } from "./syncShellEnvironment.ts";
 import { waitForBackendStartupReady } from "./backendStartupReadiness.ts";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState.ts";
@@ -102,7 +105,12 @@ const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secr
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
-const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
+const GET_DESKTOP_RUNTIME_STATUS_CHANNEL = "desktop:get-runtime-status";
+const GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL = "desktop:get-network-diagnostics";
+const BASE_DIR =
+  process.env.T3CODE_HOME?.trim() ||
+  process.env.HARBORDEX_HOME?.trim() ||
+  Path.join(OS.homedir(), ".harbordex");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SETTINGS_PATH = Path.join(STATE_DIR, "desktop-settings.json");
 const CLIENT_SETTINGS_PATH = Path.join(STATE_DIR, "client-settings.json");
@@ -308,6 +316,28 @@ function getDesktopServerExposureState(): DesktopServerExposureState {
   };
 }
 
+function getDesktopRuntimeStatus(): DesktopRuntimeStatus {
+  return {
+    backendRunning: backendProcess !== null && backendProcess.exitCode === null,
+    backendProcessId: backendProcess?.pid ?? null,
+    localHttpUrl: backendHttpUrl || null,
+    localWsUrl: backendWsUrl || null,
+    exposureMode: desktopServerExposureMode,
+    exposureEndpointUrl: backendEndpointUrl,
+    exposureAdvertisedHost: backendAdvertisedHost,
+  };
+}
+
+async function getDesktopNetworkDiagnostics(): Promise<DesktopNetworkDiagnostics> {
+  return collectDesktopNetworkDiagnostics({
+    localHttpUrl: backendHttpUrl || null,
+    localWsUrl: backendWsUrl || null,
+    exposureMode: desktopServerExposureMode,
+    exposureEndpointUrl: backendEndpointUrl,
+    exposureAdvertisedHost: backendAdvertisedHost,
+  });
+}
+
 function getDesktopSecretStorage() {
   return {
     isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -361,31 +391,38 @@ async function applyDesktopServerExposureMode(
   return getDesktopServerExposureState();
 }
 
-function relaunchDesktopApp(reason: string): void {
-  writeDesktopLogHeader(`desktop relaunch requested reason=${reason}`);
-  setImmediate(() => {
-    isQuitting = true;
-    clearUpdatePollTimer();
-    cancelBackendReadinessWait();
-    void stopBackendAndWaitForExit()
-      .catch((error) => {
-        writeDesktopLogHeader(
-          `desktop relaunch backend shutdown warning message=${formatErrorMessage(error)}`,
-        );
-      })
-      .finally(() => {
-        restoreStdIoCapture?.();
-        if (isDevelopment) {
-          app.exit(75);
-          return;
-        }
-        app.relaunch({
-          execPath: process.execPath,
-          args: process.argv.slice(1),
-        });
-        app.exit(0);
-      });
+async function restartDesktopBackendForExposureChange(reason: string): Promise<void> {
+  writeDesktopLogHeader(`desktop backend restart requested reason=${reason}`);
+  cancelBackendReadinessWait();
+
+  await stopBackendAndWaitForExit().catch((error) => {
+    writeDesktopLogHeader(
+      `desktop backend restart shutdown warning message=${formatErrorMessage(error)}`,
+    );
   });
+
+  if (isQuitting) {
+    return;
+  }
+
+  // Refresh the desktop bootstrap credential whenever the backend restarts
+  // so renderer auth bootstrap can recover cleanly if needed.
+  backendBootstrapToken = Crypto.randomBytes(24).toString("hex");
+  startBackend();
+
+  if (isDevelopment) {
+    return;
+  }
+
+  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  if (!existingWindow || existingWindow.isDestroyed()) {
+    return;
+  }
+
+  const currentUrl = existingWindow.webContents.getURL();
+  if (currentUrl !== backendHttpUrl) {
+    void existingWindow.loadURL(backendHttpUrl);
+  }
 }
 
 function writeDesktopLogHeader(message: string): void {
@@ -792,7 +829,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
-    dialog.showErrorBox("T3 Code failed to start", `Stage: ${stage}\n${message}${detail}`);
+    dialog.showErrorBox("Harbordex failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
   stopBackend();
   restoreStdIoCapture?.();
@@ -897,7 +934,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
     void dialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
-      message: `T3 Code ${updateState.currentVersion} is currently the newest version available.`,
+      message: `${desktopAppBranding.baseName} ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {
@@ -1057,6 +1094,7 @@ function configureAppIdentity(): void {
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
     version: commitHash ?? "unknown",
+    copyright: "Harbordex is a fork of t3code.",
   });
 
   if (process.platform === "win32") {
@@ -1417,6 +1455,9 @@ function startBackend(): void {
     return;
   }
   const listeningDetector = new ServerListeningDetector();
+  // Ensure intentional restart paths cannot surface as unhandled rejections when
+  // no caller is actively awaiting the listening promise.
+  listeningDetector.promise.catch(() => undefined);
   backendListeningDetector = listeningDetector;
   backendProcess = child;
   let backendSessionClosed = false;
@@ -1665,9 +1706,18 @@ function registerIpcHandlers(): void {
       persist: true,
       rejectIfUnavailable: true,
     });
-    relaunchDesktopApp(`serverExposureMode=${nextMode}`);
+    await restartDesktopBackendForExposureChange(`serverExposureMode=${nextMode}`);
     return nextState;
   });
+
+  ipcMain.removeHandler(GET_DESKTOP_RUNTIME_STATUS_CHANNEL);
+  ipcMain.handle(GET_DESKTOP_RUNTIME_STATUS_CHANNEL, async () => getDesktopRuntimeStatus());
+
+  ipcMain.removeHandler(GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL);
+  ipcMain.handle(
+    GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL,
+    async () => getDesktopNetworkDiagnostics(),
+  );
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async (_event, rawOptions: unknown) => {
@@ -2032,7 +2082,32 @@ function createWindow(): BrowserWindow {
 // Must be called synchronously at the top level — before `app.whenReady()`.
 app.setPath("userData", resolveUserDataPath());
 
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  isQuitting = true;
+  app.quit();
+}
+
 configureAppIdentity();
+
+function revealOrCreateMainWindow(): void {
+  const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
+  if (existingWindow) {
+    revealWindow(existingWindow);
+    return;
+  }
+
+  if (!app.isReady()) {
+    return;
+  }
+
+  if (isDevelopment) {
+    mainWindow = createWindow();
+    return;
+  }
+
+  ensureInitialBackendWindowOpen();
+}
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
@@ -2113,6 +2188,23 @@ app.on("before-quit", () => {
   restoreStdIoCapture?.();
 });
 
+app.on("second-instance", () => {
+  if (isQuitting) {
+    return;
+  }
+
+  if (app.isReady()) {
+    revealOrCreateMainWindow();
+    return;
+  }
+
+  app.once("ready", () => {
+    if (!isQuitting) {
+      revealOrCreateMainWindow();
+    }
+  });
+});
+
 app
   .whenReady()
   .then(() => {
@@ -2129,16 +2221,7 @@ app
     });
 
     app.on("activate", () => {
-      const existingWindow = mainWindow ?? BrowserWindow.getAllWindows()[0];
-      if (existingWindow) {
-        revealWindow(existingWindow);
-        return;
-      }
-      if (isDevelopment) {
-        mainWindow = createWindow();
-        return;
-      }
-      ensureInitialBackendWindowOpen();
+      revealOrCreateMainWindow();
     });
   })
   .catch((error) => {

@@ -1,11 +1,21 @@
-# T3 Code
+# Harbordex
 
-T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more coming soon).
+Harbordex is a desktop-first coding workspace for agentic development.
+
+Harbordex is a fork of t3code.
+
+## Architecture
+
+- `apps/desktop`: Electron shell and local backend process manager
+- `apps/web`: shared renderer UI used by desktop and web
+- `apps/server`: local backend and CLI runtime
+
+`apps/web` is required for desktop and should not be removed.
 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex and Claude.
+> Harbordex currently supports Codex and Claude.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://github.com/openai/codex) and run `codex login`
@@ -17,9 +27,11 @@ T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more
 npx t3
 ```
 
+The CLI command remains `t3` in v2.0 for upstream compatibility.
+
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Install the latest desktop app from [GitHub Releases](https://github.com/trahane/t3code/releases), or from your package manager:
 
 #### Windows (`winget`)
 
@@ -38,6 +50,12 @@ brew install --cask t3-code
 ```bash
 yay -S t3code-bin
 ```
+
+## Compatibility And Defaults
+
+- Internal identifiers remain t3-style in v2.0 (`@t3tools`, `T3CODE_*`, CLI package `t3`).
+- Default local state path is `~/.harbordex`.
+- `T3CODE_HOME` is still supported, and `HARBORDEX_HOME` is also accepted by desktop.
 
 ## Some notes
 

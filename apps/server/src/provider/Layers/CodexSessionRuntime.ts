@@ -25,7 +25,7 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { buildCodexInitializeParams } from "./CodexProvider.ts";
+import { buildCodexInitializeParams, resolveCodexHomePath } from "./CodexProvider.ts";
 import {
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
@@ -678,12 +678,16 @@ export const makeCodexSessionRuntime = (
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
     const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
     const closedRef = yield* Ref.make(false);
+    const codexHome = resolveCodexHomePath({
+      homePath: options.homePath,
+      cwd: options.cwd,
+    });
 
     const child = yield* spawner
       .spawn(
         ChildProcess.make(options.binaryPath, ["app-server"], {
           cwd: options.cwd,
-          ...(options.homePath ? { env: { ...process.env, CODEX_HOME: options.homePath } } : {}),
+          env: { ...process.env, CODEX_HOME: codexHome },
           shell: process.platform === "win32",
         }),
       )
@@ -1134,7 +1138,13 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
+      yield* client.request(
+        "initialize",
+        buildCodexInitializeParams({
+          homePath: codexHome,
+          cwd: options.cwd,
+        }),
+      );
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);

@@ -1,13 +1,16 @@
 import { PlusIcon, QrCodeIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type AuthClientSession,
   type AuthPairingLink,
+  type DesktopNetworkDiagnostics,
+  type DesktopRuntimeStatus,
   type DesktopServerExposureState,
   type EnvironmentId,
 } from "@t3tools/contracts";
 import { DateTime } from "effect";
 
+import { APP_BASE_NAME } from "../../branding";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
@@ -47,16 +50,12 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { setPairingTokenOnUrl } from "../../pairingUrl";
 import {
-  createServerPairingCredential,
-  fetchSessionState,
-  revokeOtherServerClientSessions,
-  revokeServerClientSession,
-  revokeServerPairingLink,
   isLoopbackHostname,
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
 } from "~/environments/primary";
 import type { WsRpcClient } from "~/rpc/wsRpcClient";
+import { createDefaultConnectionsAccessProvider } from "./connectionsAccessProvider";
 import {
   type SavedEnvironmentRecord,
   type SavedEnvironmentRuntimeState,
@@ -79,6 +78,73 @@ function formatAccessTimestamp(value: string): string {
     return value;
   }
   return accessTimestampFormatter.format(parsed);
+}
+
+type GeneratedMobilePairingCredential = {
+  id: string;
+  credential: string;
+  expiresAt: string;
+  label?: string;
+};
+
+function toWsUrlFromHttpUrl(httpUrl: string | null): string | null {
+  if (!httpUrl) {
+    return null;
+  }
+
+  try {
+    const url = new URL(httpUrl);
+    if (url.protocol === "http:") {
+      url.protocol = "ws:";
+    } else if (url.protocol === "https:") {
+      url.protocol = "wss:";
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function resolveTailscaleWsUrl(
+  tailscaleIp: string | null,
+  localWsUrl: string | null,
+): string | null {
+  if (!tailscaleIp || !localWsUrl) {
+    return null;
+  }
+
+  try {
+    const localUrl = new URL(localWsUrl);
+    const protocol = localUrl.protocol === "wss:" ? "wss:" : "ws:";
+    const port =
+      localUrl.port ||
+      (localUrl.protocol === "wss:" || localUrl.protocol === "https:" ? "443" : "80");
+    return `${protocol}//${tailscaleIp}:${port}`;
+  } catch {
+    return null;
+  }
+}
+
+function toIsoString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return DateTime.formatIso(value as DateTime.Utc);
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+function isMobileLikeClientSession(clientSession: ServerClientSessionRecord): boolean {
+  return (
+    clientSession.client.deviceType === "mobile" || clientSession.client.deviceType === "tablet"
+  );
+}
+
+function isDesktopClientSession(clientSession: ServerClientSessionRecord): boolean {
+  return clientSession.client.deviceType === "desktop";
 }
 
 type ConnectionStatusDotProps = {
@@ -518,12 +584,14 @@ type AuthorizedClientsHeaderActionProps = {
   clientSessions: ReadonlyArray<ServerClientSessionRecord>;
   isRevokingOtherClients: boolean;
   onRevokeOtherClients: () => void;
+  onCreatePairingLink: (label?: string) => Promise<void>;
 };
 
 const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderAction({
   clientSessions,
   isRevokingOtherClients,
   onRevokeOtherClients,
+  onCreatePairingLink,
 }: AuthorizedClientsHeaderActionProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pairingLabel, setPairingLabel] = useState("");
@@ -532,7 +600,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
   const handleCreatePairingLink = useCallback(async () => {
     setIsCreatingPairingLink(true);
     try {
-      await createServerPairingCredential(pairingLabel);
+      await onCreatePairingLink(pairingLabel);
       setPairingLabel("");
       setDialogOpen(false);
     } catch (error) {
@@ -547,7 +615,7 @@ const AuthorizedClientsHeaderAction = memo(function AuthorizedClientsHeaderActio
     } finally {
       setIsCreatingPairingLink(false);
     }
-  }, [pairingLabel]);
+  }, [onCreatePairingLink, pairingLabel]);
 
   return (
     <div className="flex items-center gap-2">
@@ -757,6 +825,7 @@ function SavedBackendListRow({
 
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
+  const accessProvider = useMemo(() => createDefaultConnectionsAccessProvider(), []);
   const [currentSessionRole, setCurrentSessionRole] = useState<"owner" | "client" | null>(
     desktopBridge ? "owner" : null,
   );
@@ -775,6 +844,15 @@ export function ConnectionsSettings() {
   const [desktopServerExposureState, setDesktopServerExposureState] =
     useState<DesktopServerExposureState | null>(null);
   const [desktopServerExposureError, setDesktopServerExposureError] = useState<string | null>(null);
+  const [desktopRuntimeStatus, setDesktopRuntimeStatus] = useState<DesktopRuntimeStatus | null>(
+    null,
+  );
+  const [desktopRuntimeStatusError, setDesktopRuntimeStatusError] = useState<string | null>(null);
+  const [desktopNetworkDiagnostics, setDesktopNetworkDiagnostics] =
+    useState<DesktopNetworkDiagnostics | null>(null);
+  const [desktopNetworkDiagnosticsError, setDesktopNetworkDiagnosticsError] = useState<
+    string | null
+  >(null);
   const [desktopPairingLinks, setDesktopPairingLinks] = useState<
     ReadonlyArray<ServerPairingLinkRecord>
   >([]);
@@ -792,6 +870,10 @@ export function ConnectionsSettings() {
     string | null
   >(null);
   const [isRevokingOtherDesktopClients, setIsRevokingOtherDesktopClients] = useState(false);
+  const [isGeneratingMobilePairingCredential, setIsGeneratingMobilePairingCredential] =
+    useState(false);
+  const [generatedMobilePairingCredential, setGeneratedMobilePairingCredential] =
+    useState<GeneratedMobilePairingCredential | null>(null);
   const [addBackendDialogOpen, setAddBackendDialogOpen] = useState(false);
   const [savedBackendMode, setSavedBackendMode] = useState<"pairing-url" | "host-code">(
     "pairing-url",
@@ -810,10 +892,118 @@ export function ConnectionsSettings() {
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
+  const [isRefreshingDesktopDiagnostics, setIsRefreshingDesktopDiagnostics] = useState(false);
+  const refreshDesktopDiagnosticsRef = useRef<(() => Promise<void>) | null>(null);
   const canManageLocalBackend = currentSessionRole === "owner";
   const isLocalBackendNetworkAccessible = desktopBridge
     ? desktopServerExposureState?.mode === "network-accessible"
     : currentAuthPolicy === "remote-reachable";
+  const nonDesktopClientSessions = useMemo(
+    () => desktopClientSessions.filter((clientSession) => !isDesktopClientSession(clientSession)),
+    [desktopClientSessions],
+  );
+  const connectedNonDesktopClientCount = useMemo(
+    () =>
+      nonDesktopClientSessions.filter(
+        (clientSession) => clientSession.current || clientSession.connected,
+      ).length,
+    [nonDesktopClientSessions],
+  );
+  const mobileDesktopClientSessions = useMemo(
+    () => desktopClientSessions.filter((clientSession) => isMobileLikeClientSession(clientSession)),
+    [desktopClientSessions],
+  );
+  const connectedMobileClientCount = useMemo(
+    () =>
+      mobileDesktopClientSessions.filter(
+        (clientSession) => clientSession.current || clientSession.connected,
+      ).length,
+    [mobileDesktopClientSessions],
+  );
+  const localWsUrl = desktopNetworkDiagnostics?.localWsUrl ?? desktopRuntimeStatus?.localWsUrl ?? null;
+  const exposureHttpUrl =
+    desktopNetworkDiagnostics?.exposureEndpointUrl ??
+    desktopRuntimeStatus?.exposureEndpointUrl ??
+    desktopServerExposureState?.endpointUrl ??
+    null;
+  const exposureWsUrl = toWsUrlFromHttpUrl(exposureHttpUrl);
+  const tailscaleWsUrl = resolveTailscaleWsUrl(
+    desktopNetworkDiagnostics?.tailscale.ip ?? null,
+    localWsUrl,
+  );
+  const tailscaleDiagnostics = desktopNetworkDiagnostics?.tailscale ?? null;
+  const tailscaleStatusLabel = tailscaleDiagnostics
+    ? tailscaleDiagnostics.available
+      ? "Available"
+      : "Unavailable"
+    : "Checking…";
+  const tailscaleSummary = useMemo(() => {
+    if (!tailscaleDiagnostics) {
+      return "Detecting Tailscale status on this desktop.";
+    }
+
+    const summaryBits = [
+      tailscaleDiagnostics.version ? `Version ${tailscaleDiagnostics.version}` : null,
+      tailscaleDiagnostics.backendState ? `State ${tailscaleDiagnostics.backendState}` : null,
+      tailscaleDiagnostics.ip,
+      tailscaleDiagnostics.dnsName ?? tailscaleDiagnostics.hostname,
+    ].filter((value): value is string => value !== null);
+
+    if (summaryBits.length > 0) {
+      return summaryBits.join(" · ");
+    }
+
+    return tailscaleDiagnostics.message ?? "No Tailscale diagnostics available.";
+  }, [tailscaleDiagnostics]);
+  const generatedMobilePairingUrl = useMemo(() => {
+    if (!generatedMobilePairingCredential) {
+      return null;
+    }
+
+    if (exposureHttpUrl) {
+      return resolveDesktopPairingUrl(exposureHttpUrl, generatedMobilePairingCredential.credential);
+    }
+
+    if (isLoopbackHostname(window.location.hostname)) {
+      return null;
+    }
+
+    return resolveCurrentOriginPairingUrl(generatedMobilePairingCredential.credential);
+  }, [exposureHttpUrl, generatedMobilePairingCredential]);
+  const generatedMobilePairingCopyValue =
+    generatedMobilePairingUrl ?? generatedMobilePairingCredential?.credential ?? null;
+  const generatedMobilePairingExpiresAtLabel = generatedMobilePairingCredential
+    ? formatAccessTimestamp(generatedMobilePairingCredential.expiresAt)
+    : null;
+
+  const copyValue = useCallback(async (value: string, successTitle: string) => {
+    if (!navigator.clipboard?.writeText) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Clipboard unavailable",
+          description: "Copy is unavailable in this environment.",
+        }),
+      );
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      toastManager.add({
+        type: "success",
+        title: successTitle,
+      });
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not copy value",
+          description: error instanceof Error ? error.message : "Clipboard write failed.",
+        }),
+      );
+    }
+  }, []);
 
   const handleDesktopServerExposureChange = useCallback(
     async (checked: boolean) => {
@@ -855,7 +1045,7 @@ export function ConnectionsSettings() {
     setRevokingDesktopPairingLinkId(id);
     setDesktopAccessManagementError(null);
     try {
-      await revokeServerPairingLink(id);
+      await accessProvider.revokePairingLink(id);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to revoke pairing link.";
       setDesktopAccessManagementError(message);
@@ -869,14 +1059,14 @@ export function ConnectionsSettings() {
     } finally {
       setRevokingDesktopPairingLinkId(null);
     }
-  }, []);
+  }, [accessProvider]);
 
   const handleRevokeDesktopClientSession = useCallback(
     async (sessionId: ServerClientSessionRecord["sessionId"]) => {
       setRevokingDesktopClientSessionId(sessionId);
       setDesktopAccessManagementError(null);
       try {
-        await revokeServerClientSession(sessionId);
+        await accessProvider.revokeClientSession(sessionId);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Failed to revoke client access.";
         setDesktopAccessManagementError(message);
@@ -891,14 +1081,14 @@ export function ConnectionsSettings() {
         setRevokingDesktopClientSessionId(null);
       }
     },
-    [],
+    [accessProvider],
   );
 
   const handleRevokeOtherDesktopClients = useCallback(async () => {
     setIsRevokingOtherDesktopClients(true);
     setDesktopAccessManagementError(null);
     try {
-      const revokedCount = await revokeOtherServerClientSessions();
+      const revokedCount = await accessProvider.revokeOtherClientSessions();
       toastManager.add({
         type: "success",
         title: revokedCount === 1 ? "Revoked 1 other client" : `Revoked ${revokedCount} clients`,
@@ -917,7 +1107,44 @@ export function ConnectionsSettings() {
     } finally {
       setIsRevokingOtherDesktopClients(false);
     }
-  }, []);
+  }, [accessProvider]);
+
+  const handleCreateDesktopPairingLink = useCallback(
+    async (label?: string) => {
+      await accessProvider.createPairingCredential(label);
+    },
+    [accessProvider],
+  );
+
+  const handleGenerateMobilePairingCredential = useCallback(async () => {
+    setIsGeneratingMobilePairingCredential(true);
+    setDesktopAccessManagementError(null);
+    try {
+      const nextCredential = await accessProvider.createPairingCredential("Mobile");
+      setGeneratedMobilePairingCredential({
+        id: nextCredential.id,
+        credential: nextCredential.credential,
+        ...(nextCredential.label ? { label: nextCredential.label } : {}),
+        expiresAt: toIsoString(nextCredential.expiresAt),
+      });
+      toastManager.add({
+        type: "success",
+        title: "Mobile pairing QR ready",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to generate pairing QR.";
+      setDesktopAccessManagementError(message);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not generate mobile pairing QR",
+          description: message,
+        }),
+      );
+    } finally {
+      setIsGeneratingMobilePairingCredential(false);
+    }
+  }, [accessProvider]);
 
   const handleAddSavedBackend = useCallback(async () => {
     setIsAddingSavedBackend(true);
@@ -1010,7 +1237,8 @@ export function ConnectionsSettings() {
     }
 
     let cancelled = false;
-    void fetchSessionState()
+    void accessProvider
+      .fetchSessionState()
       .then((session) => {
         if (cancelled) return;
         setCurrentSessionRole(session.authenticated ? (session.role ?? null) : null);
@@ -1025,12 +1253,17 @@ export function ConnectionsSettings() {
     return () => {
       cancelled = true;
     };
-  }, [desktopBridge]);
+  }, [accessProvider, desktopBridge]);
 
   useEffect(() => {
-    if (!canManageLocalBackend) return;
+    if (!canManageLocalBackend) {
+      refreshDesktopDiagnosticsRef.current = null;
+      setIsRefreshingDesktopDiagnostics(false);
+      return;
+    }
 
     let cancelled = false;
+    let diagnosticsInterval: ReturnType<typeof setInterval> | null = null;
     setIsLoadingDesktopAccessManagement(true);
     type AuthAccessEvent = Parameters<
       Parameters<WsRpcClient["server"]["subscribeAuthAccess"]>[0]
@@ -1092,26 +1325,91 @@ export function ConnectionsSettings() {
           },
         },
       );
-    if (desktopBridge) {
-      void desktopBridge
-        .getServerExposureState()
-        .then((state) => {
-          if (cancelled) return;
+
+    const refreshDesktopDiagnostics = async ({
+      manual = false,
+    }: {
+      manual?: boolean;
+    } = {}) => {
+      if (!desktopBridge || cancelled) {
+        return;
+      }
+
+      if (manual) {
+        setIsRefreshingDesktopDiagnostics(true);
+      }
+
+      try {
+        const state = await desktopBridge.getServerExposureState();
+        if (!cancelled) {
           setDesktopServerExposureState(state);
-        })
-        .catch((error: unknown) => {
-          if (cancelled) return;
+          setDesktopServerExposureError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
           const message =
             error instanceof Error ? error.message : "Failed to load network exposure state.";
           setDesktopServerExposureError(message);
-        });
+        }
+      }
+
+      try {
+        const runtimeStatus = await desktopBridge.getDesktopRuntimeStatus();
+        if (!cancelled) {
+          setDesktopRuntimeStatus(runtimeStatus);
+          setDesktopRuntimeStatusError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message =
+            error instanceof Error ? error.message : "Failed to load desktop runtime status.";
+          setDesktopRuntimeStatusError(message);
+        }
+      }
+
+      try {
+        const networkDiagnostics = await desktopBridge.getDesktopNetworkDiagnostics();
+        if (!cancelled) {
+          setDesktopNetworkDiagnostics(networkDiagnostics);
+          setDesktopNetworkDiagnosticsError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message =
+            error instanceof Error ? error.message : "Failed to load network diagnostics.";
+          setDesktopNetworkDiagnosticsError(message);
+        }
+      } finally {
+        if (manual && !cancelled) {
+          setIsRefreshingDesktopDiagnostics(false);
+        }
+      }
+    };
+
+    if (desktopBridge) {
+      refreshDesktopDiagnosticsRef.current = () => refreshDesktopDiagnostics({ manual: true });
+      void refreshDesktopDiagnostics();
+      diagnosticsInterval = setInterval(() => {
+        void refreshDesktopDiagnostics();
+      }, 15_000);
     } else {
+      refreshDesktopDiagnosticsRef.current = null;
+      setIsRefreshingDesktopDiagnostics(false);
       setDesktopServerExposureState(null);
       setDesktopServerExposureError(null);
+      setDesktopRuntimeStatus(null);
+      setDesktopRuntimeStatusError(null);
+      setDesktopNetworkDiagnostics(null);
+      setDesktopNetworkDiagnosticsError(null);
     }
 
     return () => {
       cancelled = true;
+      refreshDesktopDiagnosticsRef.current = null;
+      setIsRefreshingDesktopDiagnostics(false);
+      if (diagnosticsInterval) {
+        clearInterval(diagnosticsInterval);
+      }
       unsubscribeAuthAccess();
     };
   }, [canManageLocalBackend, desktopBridge]);
@@ -1124,6 +1422,10 @@ export function ConnectionsSettings() {
     setDesktopAccessManagementError(null);
     setDesktopServerExposureState(null);
     setDesktopServerExposureError(null);
+    setDesktopRuntimeStatus(null);
+    setDesktopRuntimeStatusError(null);
+    setDesktopNetworkDiagnostics(null);
+    setDesktopNetworkDiagnosticsError(null);
   }, [canManageLocalBackend]);
   const visibleDesktopPairingLinks = useMemo(
     () => desktopPairingLinks.filter((pairingLink) => pairingLink.role === "client"),
@@ -1145,7 +1447,7 @@ export function ConnectionsSettings() {
                         ? `Exposed on all interfaces. Pairing links use ${desktopServerExposureState.advertisedHost}.`
                         : "Exposed on all interfaces."
                       : desktopServerExposureState
-                        ? "Limited to this machine."
+                        ? "Desktop-only (localhost). Enable network access for mobile or remote clients."
                         : "Loading…"
                 }
                 status={
@@ -1180,8 +1482,8 @@ export function ConnectionsSettings() {
                         </AlertDialogTitle>
                         <AlertDialogDescription>
                           {pendingDesktopServerExposureMode === "network-accessible"
-                            ? "T3 Code will restart to expose this environment over the network."
-                            : "T3 Code will restart and limit this environment back to this machine."}
+                            ? `${APP_BASE_NAME} will restart the local backend to expose this environment over the network.`
+                            : `${APP_BASE_NAME} will restart the local backend and limit this environment to desktop-only localhost access.`}
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -1247,14 +1549,311 @@ export function ConnectionsSettings() {
             )}
           </SettingsSection>
 
+          {desktopBridge ? (
+            <>
+              <SettingsSection title="Desktop runtime">
+                <SettingsRow
+                  title="Backend process"
+                  description="Desktop manages backend lifecycle automatically for this local environment."
+                  status={
+                    desktopRuntimeStatusError ? (
+                      <span className="block text-destructive">{desktopRuntimeStatusError}</span>
+                    ) : desktopRuntimeStatus ? (
+                      <span className="font-mono tabular-nums text-[11px]">
+                        PID {desktopRuntimeStatus.backendProcessId ?? "—"}
+                      </span>
+                    ) : (
+                      "Loading runtime status…"
+                    )
+                  }
+                  control={
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-2 text-xs",
+                        desktopRuntimeStatus?.backendRunning ? "text-success" : "text-muted-foreground",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "inline-flex size-2 rounded-full",
+                          desktopRuntimeStatus?.backendRunning
+                            ? "bg-success animate-pulse"
+                            : "bg-muted-foreground/50",
+                        )}
+                      />
+                      {desktopRuntimeStatus
+                        ? desktopRuntimeStatus.backendRunning
+                          ? "Running"
+                          : "Not running"
+                        : "Checking…"}
+                    </span>
+                  }
+                />
+                <SettingsRow
+                  title="Connected clients"
+                  description="Active paired clients currently connected to this backend."
+                  status={
+                    <span className="font-mono tabular-nums text-[11px]">
+                      {connectedNonDesktopClientCount} active · {nonDesktopClientSessions.length} total
+                    </span>
+                  }
+                />
+                <SettingsRow
+                  title="Local WebSocket endpoint"
+                  description="Used by this desktop and local-network mobile clients."
+                  status={
+                    localWsUrl ? (
+                      <code className="text-[11px]">{localWsUrl}</code>
+                    ) : (
+                      <span className="text-muted-foreground/80">Not available yet.</span>
+                    )
+                  }
+                  control={
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!localWsUrl}
+                      onClick={() =>
+                        localWsUrl
+                          ? void copyValue(localWsUrl, "Local WebSocket URL copied")
+                          : undefined
+                      }
+                    >
+                      Copy
+                    </Button>
+                  }
+                />
+              </SettingsSection>
+
+              <SettingsSection
+                title="Network diagnostics"
+                headerAction={
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={isRefreshingDesktopDiagnostics}
+                    onClick={() => {
+                      const refreshDesktopDiagnostics = refreshDesktopDiagnosticsRef.current;
+                      if (!refreshDesktopDiagnostics) {
+                        return;
+                      }
+                      void refreshDesktopDiagnostics();
+                    }}
+                  >
+                    {isRefreshingDesktopDiagnostics ? (
+                      <>
+                        <Spinner className="size-3.5" />
+                        Refreshing…
+                      </>
+                    ) : (
+                      "Refresh"
+                    )}
+                  </Button>
+                }
+              >
+                <SettingsRow
+                  title="Network WebSocket endpoint"
+                  description="Remote devices on your private network should use this when available."
+                  status={
+                    exposureWsUrl ? (
+                      <code className="text-[11px]">{exposureWsUrl}</code>
+                    ) : (
+                      <span className="text-muted-foreground/80">
+                        Network endpoint unavailable. Enable network access to pair remote devices.
+                      </span>
+                    )
+                  }
+                  control={
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!exposureWsUrl}
+                      onClick={() =>
+                        exposureWsUrl
+                          ? void copyValue(exposureWsUrl, "Network WebSocket URL copied")
+                          : undefined
+                      }
+                    >
+                      Copy
+                    </Button>
+                  }
+                />
+                <SettingsRow
+                  title="Tailscale"
+                  description="Read-only diagnostics for Tailscale availability and addressing."
+                  status={
+                    <>
+                      {desktopNetworkDiagnosticsError ? (
+                        <span className="block text-destructive">{desktopNetworkDiagnosticsError}</span>
+                      ) : null}
+                      <span className="block text-[11px]">{tailscaleSummary}</span>
+                      {tailscaleWsUrl ? (
+                        <code className="block text-[11px]">{tailscaleWsUrl}</code>
+                      ) : null}
+                    </>
+                  }
+                  control={
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center rounded-md border px-2 py-1 text-[10px]",
+                          tailscaleDiagnostics?.available
+                            ? "border-success/40 text-success"
+                            : "border-border text-muted-foreground",
+                        )}
+                      >
+                        {tailscaleStatusLabel}
+                      </span>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={!tailscaleWsUrl}
+                        onClick={() =>
+                          tailscaleWsUrl
+                            ? void copyValue(tailscaleWsUrl, "Tailscale WebSocket URL copied")
+                            : undefined
+                        }
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                  }
+                />
+              </SettingsSection>
+
+              <SettingsSection title="Mobile access">
+                <SettingsRow
+                  title="Generate mobile pairing QR"
+                  description={
+                    isLocalBackendNetworkAccessible
+                      ? "Create a one-time credential and QR so a phone can pair to this backend and continue the same threads."
+                      : "Enable network access first, then generate a QR to pair a phone to this shared backend."
+                  }
+                  status={
+                    desktopAccessManagementError ? (
+                      <span className="block text-destructive">{desktopAccessManagementError}</span>
+                    ) : generatedMobilePairingExpiresAtLabel ? (
+                      <span className="text-[11px]">Last generated credential expires {generatedMobilePairingExpiresAtLabel}</span>
+                    ) : (
+                      <span className="text-[11px] text-muted-foreground">No pairing credential generated yet.</span>
+                    )
+                  }
+                  control={
+                    <Button
+                      size="xs"
+                      variant="default"
+                      disabled={isGeneratingMobilePairingCredential || !isLocalBackendNetworkAccessible}
+                      onClick={() => void handleGenerateMobilePairingCredential()}
+                    >
+                      {isGeneratingMobilePairingCredential ? "Generating…" : "Generate QR"}
+                    </Button>
+                  }
+                />
+                {generatedMobilePairingCredential ? (
+                  <div className={ITEM_ROW_CLASSNAME}>
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="space-y-2 min-w-0 flex-1">
+                        <p className="text-xs text-muted-foreground">
+                          {generatedMobilePairingUrl
+                            ? "Scan this QR code from Harbordex Mobile."
+                            : "Copy this token and pair from mobile using this backend's reachable host."}
+                        </p>
+                        <Textarea
+                          readOnly
+                          rows={generatedMobilePairingUrl ? 4 : 3}
+                          value={generatedMobilePairingCopyValue ?? ""}
+                          className="text-xs leading-relaxed"
+                          onFocus={(event) => event.currentTarget.select()}
+                          onClick={(event) => event.currentTarget.select()}
+                        />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={!generatedMobilePairingCopyValue}
+                            onClick={() =>
+                              generatedMobilePairingCopyValue
+                                ? void copyValue(
+                                    generatedMobilePairingCopyValue,
+                                    generatedMobilePairingUrl
+                                      ? "Mobile pairing URL copied"
+                                      : "Mobile pairing token copied",
+                                  )
+                                : undefined
+                            }
+                          >
+                            Copy
+                          </Button>
+                          <span className="text-[11px] text-muted-foreground">
+                            Expires {generatedMobilePairingExpiresAtLabel}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 justify-center">
+                        {generatedMobilePairingUrl ? (
+                          <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                            <QRCodeSvg
+                              value={generatedMobilePairingUrl}
+                              size={148}
+                              level="M"
+                              marginSize={2}
+                              title="Mobile pairing credential"
+                            />
+                          </div>
+                        ) : (
+                          <div className="rounded-xl border border-border/60 bg-muted/30 px-4 py-10 text-[11px] text-muted-foreground">
+                            QR unavailable
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                <SettingsRow
+                  title="Paired mobile clients"
+                  description="Sessions identified as mobile or tablet clients."
+                  status={
+                    <span className="font-mono tabular-nums text-[11px]">
+                      {connectedMobileClientCount} active · {mobileDesktopClientSessions.length} total
+                    </span>
+                  }
+                />
+                {mobileDesktopClientSessions.length === 0 ? (
+                  <div className={ITEM_ROW_CLASSNAME}>
+                    <p className="text-xs text-muted-foreground">
+                      No paired mobile sessions yet. Generate a pairing QR and connect from mobile.
+                    </p>
+                  </div>
+                ) : (
+                  mobileDesktopClientSessions.map((clientSession) => (
+                    <ConnectedClientListRow
+                      key={clientSession.sessionId}
+                      clientSession={clientSession}
+                      revokingClientSessionId={revokingDesktopClientSessionId}
+                      onRevokeSession={handleRevokeDesktopClientSession}
+                    />
+                  ))
+                )}
+              </SettingsSection>
+
+              <SettingsSection title="Cloud relay">
+                <SettingsRow
+                  title="Relay transport"
+                  description="Relay support is planned as a future milestone. This release keeps relay configuration read-only while mobile pickup uses direct pairing to this shared backend."
+                />
+              </SettingsSection>
+            </>
+          ) : null}
+
           {isLocalBackendNetworkAccessible ? (
             <SettingsSection
               title="Authorized clients"
               headerAction={
                 <AuthorizedClientsHeaderAction
-                  clientSessions={desktopClientSessions}
+                  clientSessions={nonDesktopClientSessions}
                   isRevokingOtherClients={isRevokingOtherDesktopClients}
                   onRevokeOtherClients={handleRevokeOtherDesktopClients}
+                  onCreatePairingLink={handleCreateDesktopPairingLink}
                 />
               }
             >
@@ -1267,7 +1866,7 @@ export function ConnectionsSettings() {
                 endpointUrl={desktopServerExposureState?.endpointUrl}
                 isLoading={isLoadingDesktopAccessManagement}
                 pairingLinks={visibleDesktopPairingLinks}
-                clientSessions={desktopClientSessions}
+                clientSessions={nonDesktopClientSessions}
                 revokingPairingLinkId={revokingDesktopPairingLinkId}
                 revokingClientSessionId={revokingDesktopClientSessionId}
                 onRevokePairingLink={handleRevokeDesktopPairingLink}

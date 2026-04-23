@@ -1,8 +1,9 @@
 import type { DesktopAppBranding, DesktopAppStageLabel } from "@t3tools/contracts";
+import { HARBORDEX_BRANDING } from "@t3tools/harbordex-runtime";
 
 import { isNightlyDesktopVersion } from "./updateChannels.ts";
 
-const APP_BASE_NAME = "T3 Code";
+const APP_BASE_NAME = HARBORDEX_BRANDING.productName;
 
 export function resolveDesktopAppStageLabel(input: {
   readonly isDevelopment: boolean;
