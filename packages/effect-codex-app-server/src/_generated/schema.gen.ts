@@ -30136,12 +30136,14 @@ export const ToolRequestUserInputResponse = Schema.Struct({
 export type V1InitializeParams = {
   readonly capabilities?: V1InitializeParams__InitializeCapabilities | null;
   readonly clientInfo: V1InitializeParams__ClientInfo;
+  readonly codexHome: string;
 };
 export const V1InitializeParams = Schema.Struct({
   capabilities: Schema.optionalKey(
     Schema.Union([V1InitializeParams__InitializeCapabilities, Schema.Null]),
   ),
   clientInfo: V1InitializeParams__ClientInfo,
+  codexHome: Schema.String,
 }).annotate({ title: "InitializeParams" });
 
 export type V1InitializeResponse = {

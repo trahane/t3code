@@ -213,7 +213,9 @@ export function resolveCodexHomePath(input: ResolveCodexHomePathInput = {}): str
   const envPath = process.env.CODEX_HOME?.trim();
   const rawPath = configuredPath || envPath || DEFAULT_CODEX_HOME;
   const expandedPath = expandHomePath(rawPath);
-  return isAbsolute(expandedPath) ? expandedPath : resolve(input.cwd ?? process.cwd(), expandedPath);
+  return isAbsolute(expandedPath)
+    ? expandedPath
+    : resolve(input.cwd ?? process.cwd(), expandedPath);
 }
 
 export function buildCodexInitializeParams(

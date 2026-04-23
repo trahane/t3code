@@ -6,7 +6,7 @@ import {
   type AuthSessionState,
   type AuthWebSocketTokenResult,
 } from "@t3tools/contracts";
-import { DateTime, Effect, Layer, Option } from "effect";
+import { DateTime, Duration, Effect, Layer, Option } from "effect";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
 import { AuthControlPlane } from "../Services/AuthControlPlane.ts";
@@ -33,6 +33,13 @@ type BootstrapExchangeResult = {
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
+const MOBILE_BEARER_SESSION_TTL = Duration.days(3650);
+
+function shouldIssueLongLivedMobileBearerSession(
+  requestMetadata: Parameters<ServerAuthShape["exchangeBootstrapCredentialForBearerSession"]>[1],
+): boolean {
+  return requestMetadata.deviceType === "mobile" || requestMetadata.deviceType === "tablet";
+}
 
 export function toBootstrapExchangeAuthError(cause: BootstrapCredentialError): AuthError {
   if (cause.status === 500) {
@@ -182,6 +189,9 @@ export const makeServerAuth = Effect.gen(function* () {
                 ...requestMetadata,
                 ...(grant.label ? { label: grant.label } : {}),
               },
+              ...(shouldIssueLongLivedMobileBearerSession(requestMetadata)
+                ? { ttl: MOBILE_BEARER_SESSION_TTL }
+                : {}),
             })
             .pipe(
               Effect.mapError(

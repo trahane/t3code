@@ -920,7 +920,8 @@ export function ConnectionsSettings() {
       ).length,
     [mobileDesktopClientSessions],
   );
-  const localWsUrl = desktopNetworkDiagnostics?.localWsUrl ?? desktopRuntimeStatus?.localWsUrl ?? null;
+  const localWsUrl =
+    desktopNetworkDiagnostics?.localWsUrl ?? desktopRuntimeStatus?.localWsUrl ?? null;
   const exposureHttpUrl =
     desktopNetworkDiagnostics?.exposureEndpointUrl ??
     desktopRuntimeStatus?.exposureEndpointUrl ??
@@ -1041,25 +1042,28 @@ export function ConnectionsSettings() {
     void handleDesktopServerExposureChange(checked);
   }, [handleDesktopServerExposureChange, pendingDesktopServerExposureMode]);
 
-  const handleRevokeDesktopPairingLink = useCallback(async (id: string) => {
-    setRevokingDesktopPairingLinkId(id);
-    setDesktopAccessManagementError(null);
-    try {
-      await accessProvider.revokePairingLink(id);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to revoke pairing link.";
-      setDesktopAccessManagementError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not revoke pairing link",
-          description: message,
-        }),
-      );
-    } finally {
-      setRevokingDesktopPairingLinkId(null);
-    }
-  }, [accessProvider]);
+  const handleRevokeDesktopPairingLink = useCallback(
+    async (id: string) => {
+      setRevokingDesktopPairingLinkId(id);
+      setDesktopAccessManagementError(null);
+      try {
+        await accessProvider.revokePairingLink(id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to revoke pairing link.";
+        setDesktopAccessManagementError(message);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not revoke pairing link",
+            description: message,
+          }),
+        );
+      } finally {
+        setRevokingDesktopPairingLinkId(null);
+      }
+    },
+    [accessProvider],
+  );
 
   const handleRevokeDesktopClientSession = useCallback(
     async (sessionId: ServerClientSessionRecord["sessionId"]) => {
@@ -1570,7 +1574,9 @@ export function ConnectionsSettings() {
                     <span
                       className={cn(
                         "inline-flex items-center gap-2 text-xs",
-                        desktopRuntimeStatus?.backendRunning ? "text-success" : "text-muted-foreground",
+                        desktopRuntimeStatus?.backendRunning
+                          ? "text-success"
+                          : "text-muted-foreground",
                       )}
                     >
                       <span
@@ -1594,7 +1600,8 @@ export function ConnectionsSettings() {
                   description="Active paired clients currently connected to this backend."
                   status={
                     <span className="font-mono tabular-nums text-[11px]">
-                      {connectedNonDesktopClientCount} active · {nonDesktopClientSessions.length} total
+                      {connectedNonDesktopClientCount} active · {nonDesktopClientSessions.length}{" "}
+                      total
                     </span>
                   }
                 />
@@ -1684,7 +1691,9 @@ export function ConnectionsSettings() {
                   status={
                     <>
                       {desktopNetworkDiagnosticsError ? (
-                        <span className="block text-destructive">{desktopNetworkDiagnosticsError}</span>
+                        <span className="block text-destructive">
+                          {desktopNetworkDiagnosticsError}
+                        </span>
                       ) : null}
                       <span className="block text-[11px]">{tailscaleSummary}</span>
                       {tailscaleWsUrl ? (
@@ -1733,16 +1742,22 @@ export function ConnectionsSettings() {
                     desktopAccessManagementError ? (
                       <span className="block text-destructive">{desktopAccessManagementError}</span>
                     ) : generatedMobilePairingExpiresAtLabel ? (
-                      <span className="text-[11px]">Last generated credential expires {generatedMobilePairingExpiresAtLabel}</span>
+                      <span className="text-[11px]">
+                        Last generated credential expires {generatedMobilePairingExpiresAtLabel}
+                      </span>
                     ) : (
-                      <span className="text-[11px] text-muted-foreground">No pairing credential generated yet.</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        No pairing credential generated yet.
+                      </span>
                     )
                   }
                   control={
                     <Button
                       size="xs"
                       variant="default"
-                      disabled={isGeneratingMobilePairingCredential || !isLocalBackendNetworkAccessible}
+                      disabled={
+                        isGeneratingMobilePairingCredential || !isLocalBackendNetworkAccessible
+                      }
                       onClick={() => void handleGenerateMobilePairingCredential()}
                     >
                       {isGeneratingMobilePairingCredential ? "Generating…" : "Generate QR"}
@@ -1814,7 +1829,8 @@ export function ConnectionsSettings() {
                   description="Sessions identified as mobile or tablet clients."
                   status={
                     <span className="font-mono tabular-nums text-[11px]">
-                      {connectedMobileClientCount} active · {mobileDesktopClientSessions.length} total
+                      {connectedMobileClientCount} active · {mobileDesktopClientSessions.length}{" "}
+                      total
                     </span>
                   }
                 />

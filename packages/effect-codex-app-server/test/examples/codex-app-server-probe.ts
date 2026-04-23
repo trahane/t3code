@@ -44,6 +44,7 @@ const program = Effect.gen(function* () {
         experimentalApi: true,
         optOutNotificationMethods: null,
       },
+      codexHome: process.env.CODEX_HOME ?? process.cwd(),
     });
     yield* Console.log("initialize", JSON.stringify(initialized, null, 2));
 

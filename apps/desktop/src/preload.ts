@@ -56,8 +56,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getServerExposureState: () => ipcRenderer.invoke(GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) => ipcRenderer.invoke(SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
   getDesktopRuntimeStatus: () => ipcRenderer.invoke(GET_DESKTOP_RUNTIME_STATUS_CHANNEL),
-  getDesktopNetworkDiagnostics: () =>
-    ipcRenderer.invoke(GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL),
+  getDesktopNetworkDiagnostics: () => ipcRenderer.invoke(GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
   setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),

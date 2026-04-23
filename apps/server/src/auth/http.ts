@@ -1,4 +1,5 @@
 import {
+  type AuthClientMetadataDeviceType,
   type AuthBearerBootstrapResult,
   AuthBootstrapInput,
   AuthCreatePairingCredentialInput,
@@ -57,6 +58,29 @@ function hasRequestBody(headers: typeof PairingCredentialRequestHeaders.Type) {
   return typeof headers["transfer-encoding"] === "string";
 }
 
+const MOBILE_DEVICE_HINT_HEADER = "x-harbordex-client-device";
+
+function parseMobileDeviceHint(
+  value: string | undefined,
+): AuthClientMetadataDeviceType | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (
+    normalized === "desktop" ||
+    normalized === "mobile" ||
+    normalized === "tablet" ||
+    normalized === "bot" ||
+    normalized === "unknown"
+  ) {
+    return normalized;
+  }
+
+  return undefined;
+}
+
 export const authBootstrapRouteLayer = HttpRouter.add(
   "POST",
   "/api/auth/bootstrap",
@@ -108,7 +132,16 @@ export const authBearerBootstrapRouteLayer = HttpRouter.add(
     );
     const result = yield* serverAuth.exchangeBootstrapCredentialForBearerSession(
       payload.credential,
-      deriveAuthClientMetadata({ request }),
+      (() => {
+        const baseMetadata = deriveAuthClientMetadata({ request });
+        const hintedDeviceType = parseMobileDeviceHint(request.headers[MOBILE_DEVICE_HINT_HEADER]);
+        return hintedDeviceType
+          ? {
+              ...baseMetadata,
+              deviceType: hintedDeviceType,
+            }
+          : baseMetadata;
+      })(),
     );
     return HttpServerResponse.jsonUnsafe(result satisfies AuthBearerBootstrapResult, {
       status: 200,

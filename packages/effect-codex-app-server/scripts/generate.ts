@@ -51,6 +51,21 @@ class GeneratorError extends Schema.TaggedErrorClass<GeneratorError>()("Generato
 }
 
 const ManualSchemas: Record<string, typeof Schema.Json.Type> = {
+  V1InitializeParams: {
+    type: "object",
+    title: "InitializeParams",
+    properties: {
+      capabilities: {
+        anyOf: [
+          { $ref: "#/components/schemas/V1InitializeParams__InitializeCapabilities" },
+          { type: "null" },
+        ],
+      },
+      clientInfo: { $ref: "#/components/schemas/V1InitializeParams__ClientInfo" },
+      codexHome: { type: "string" },
+    },
+    required: ["clientInfo", "codexHome"],
+  },
   GetAuthStatusParams: {
     type: "object",
     title: "GetAuthStatusParams",
@@ -590,10 +605,10 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     );
   }
 
+  // Manual schemas intentionally override upstream snapshots when protocol fields
+  // move faster than the pinned generator ref.
   for (const [name, schema] of Object.entries(ManualSchemas)) {
-    if (!(name in aggregateSchemas)) {
-      aggregateSchemas[name] = stripNullDefaults(normalizeNullableTypes(schema));
-    }
+    aggregateSchemas[name] = stripNullDefaults(normalizeNullableTypes(schema));
   }
 
   const generator = makeJsonSchemaGenerator();

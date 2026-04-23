@@ -39,6 +39,16 @@ const makeCookieRequest = (
     headers: {},
   }) as unknown as Parameters<ServerAuthShape["authenticateHttpRequest"]>[0];
 
+const makeBearerRequest = (
+  sessionToken: string,
+): Parameters<ServerAuthShape["authenticateHttpRequest"]>[0] =>
+  ({
+    cookies: {},
+    headers: {
+      authorization: `Bearer ${sessionToken}`,
+    },
+  }) as unknown as Parameters<ServerAuthShape["authenticateHttpRequest"]>[0];
+
 const requestMetadata = {
   deviceType: "desktop" as const,
   os: "macOS",
@@ -114,6 +124,43 @@ it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
 
       expect(verified.role).toBe("owner");
       expect(verified.subject).toBe("owner-bootstrap");
+    }).pipe(Effect.provide(makeServerAuthLayer())),
+  );
+
+  it.effect("issues long-lived bearer sessions for mobile bootstrap clients", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* ServerAuth;
+
+      const mobilePairingCredential = yield* serverAuth.issuePairingCredential({
+        label: "Alex iPhone",
+      });
+      const mobileSession = yield* serverAuth.exchangeBootstrapCredentialForBearerSession(
+        mobilePairingCredential.credential,
+        {
+          ...requestMetadata,
+          deviceType: "mobile",
+          os: "iOS",
+          browser: "Safari",
+        },
+      );
+      const verifiedMobile = yield* serverAuth.authenticateHttpRequest(
+        makeBearerRequest(mobileSession.sessionToken),
+      );
+
+      const desktopPairingCredential = yield* serverAuth.issuePairingCredential({
+        label: "Alex Desktop Browser",
+      });
+      const desktopSession = yield* serverAuth.exchangeBootstrapCredentialForBearerSession(
+        desktopPairingCredential.credential,
+        requestMetadata,
+      );
+
+      const yearsThreeMs = 3 * 365 * 24 * 60 * 60 * 1000;
+      expect(verifiedMobile.method).toBe("bearer-session-token");
+      expect(verifiedMobile.role).toBe("client");
+      expect(mobileSession.expiresAt.epochMilliseconds).toBeGreaterThan(
+        desktopSession.expiresAt.epochMilliseconds + yearsThreeMs,
+      );
     }).pipe(Effect.provide(makeServerAuthLayer())),
   );
 

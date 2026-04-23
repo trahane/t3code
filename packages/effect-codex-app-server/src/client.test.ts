@@ -65,6 +65,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
             experimentalApi: true,
             optOutNotificationMethods: null,
           },
+          codexHome: "/tmp/codex-home",
         });
         assert.equal(initialized.userAgent, "mock-codex-app-server");
 
@@ -145,6 +146,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
             experimentalApi: true,
             optOutNotificationMethods: null,
           },
+          codexHome: "/tmp/codex-home",
         });
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
 

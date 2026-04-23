@@ -19,6 +19,8 @@ export interface RemoteAuthTransportOptions {
   readonly fetchImpl?: typeof fetch;
 }
 
+const MOBILE_DEVICE_HINT_HEADER = "x-harbordex-client-device";
+
 function remoteEndpointUrl(httpBaseUrl: string, pathname: string): string {
   const url = new URL(httpBaseUrl);
   url.pathname = pathname;
@@ -66,6 +68,7 @@ async function fetchRemoteJson<T>(input: {
   readonly method?: "GET" | "POST";
   readonly bearerToken?: string;
   readonly body?: unknown;
+  readonly headers?: Record<string, string>;
   readonly fetchImpl?: typeof fetch;
 }): Promise<T> {
   const requestUrl = remoteEndpointUrl(input.httpBaseUrl, input.pathname);
@@ -78,6 +81,7 @@ async function fetchRemoteJson<T>(input: {
       headers: {
         ...(input.body !== undefined ? { "content-type": "application/json" } : {}),
         ...(input.bearerToken ? { authorization: `Bearer ${input.bearerToken}` } : {}),
+        ...(input.headers ?? {}),
       },
       ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
     });
@@ -113,6 +117,9 @@ export async function bootstrapRemoteBearerSession(input: {
     method: "POST",
     body: {
       credential: input.credential,
+    },
+    headers: {
+      [MOBILE_DEVICE_HINT_HEADER]: "mobile",
     },
     ...(fetchImpl ? { fetchImpl } : {}),
   });

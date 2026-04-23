@@ -55,6 +55,7 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
             experimentalApi: true,
             optOutNotificationMethods: null,
           },
+          codexHome: "/tmp/codex-home",
         };
 
         const pendingInitialize = yield* transport

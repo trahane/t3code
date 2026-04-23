@@ -34,6 +34,19 @@ const handleMethod = (message: Record<string, unknown>) => {
 
   switch (method) {
     case "initialize": {
+      const params = message.params;
+      if (
+        typeof params !== "object" ||
+        params === null ||
+        typeof (params as { codexHome?: unknown }).codexHome !== "string"
+      ) {
+        respondError(
+          message.id as number | string,
+          -32602,
+          'Invalid initialize payload: Missing key at ["codexHome"].',
+        );
+        return;
+      }
       respond(message.id as number | string, {
         userAgent: "mock-codex-app-server",
         codexHome: process.cwd(),

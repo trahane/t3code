@@ -673,7 +673,9 @@ describe("GeneralSettingsPanel observability", () => {
     await expect.element(page.getByText("Julius iPhone")).toBeInTheDocument();
     await page.getByRole("button", { name: "Revoke others", exact: true }).click();
     await expect.element(page.getByText("Julius iPhone")).not.toBeInTheDocument();
-    await expect.element(page.getByText("No pairing links or client sessions.")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("No pairing links or client sessions."))
+      .toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
   });
 

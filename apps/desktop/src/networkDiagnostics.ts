@@ -123,10 +123,7 @@ async function collectTailscaleDiagnostics(): Promise<DesktopTailscaleDiagnostic
       message,
     };
   } catch {
-    return unavailableTailscaleDiagnostics(
-      "Unable to parse tailscale status output.",
-      version,
-    );
+    return unavailableTailscaleDiagnostics("Unable to parse tailscale status output.", version);
   }
 }
 

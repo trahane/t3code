@@ -1714,9 +1714,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle(GET_DESKTOP_RUNTIME_STATUS_CHANNEL, async () => getDesktopRuntimeStatus());
 
   ipcMain.removeHandler(GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL);
-  ipcMain.handle(
-    GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL,
-    async () => getDesktopNetworkDiagnostics(),
+  ipcMain.handle(GET_DESKTOP_NETWORK_DIAGNOSTICS_CHANNEL, async () =>
+    getDesktopNetworkDiagnostics(),
   );
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
