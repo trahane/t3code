@@ -312,7 +312,7 @@ export interface AcpAdapterV2Flavor {
     event: AcpSessionRuntime.AcpSessionRuntimeEvent,
   ) => Effect.Effect<void>;
   readonly subagentsIdleOnTurnCompletion?: boolean;
-  readonly supportsCompaction?: boolean;
+  readonly compaction?: "marker" | "native";
   readonly runtimeHarness?: string;
   readonly registerExtensions?: (
     context: AcpAdapterV2ExtensionContext,
@@ -6941,7 +6941,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           for (const tool of context.tools.values()) {
             if (!acpCompletedTurnShouldTerminalizeTool(tool, { ...flavor, extractSubagentUpdate }))
               continue;
-            yield* emitTool(context, tool, status);
+            yield* emitTool(
+              context,
+              tool,
+              status === "completed" && tool.toolCallId.startsWith("acp-compaction:")
+                ? "interrupted"
+                : status,
+            );
           }
         });
 
@@ -6999,10 +7005,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
           const now = yield* DateTime.now;
           if (
-            flavor.supportsCompaction === true &&
+            flavor.compaction === "marker" &&
             context.input.message.text.trim() === "/compact" &&
             context.input.message.attachments.length === 0 &&
-            settledStatus === "completed"
+            settledStatus === "completed" &&
+            !Array.from(context.tools.keys()).some((id) => id.startsWith("acp-compaction:"))
           ) {
             const nativeItemId = `${context.nativeTurnId}:compaction`;
             yield* Ref.update(compactionMarkers, (current) => {
@@ -7955,7 +7962,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               ),
           ),
           startTurn,
-          ...(flavor.supportsCompaction === true
+          ...(flavor.compaction !== undefined
             ? {
                 compactThread: (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) =>
                   startTurn({

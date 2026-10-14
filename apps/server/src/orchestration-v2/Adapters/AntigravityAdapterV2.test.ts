@@ -78,6 +78,10 @@ describe("AntigravityAdapterV2 flavor", () => {
     assert.isTrue(flavor.subagentsIdleOnTurnCompletion);
   });
 
+  it("exposes Antigravity's /compact command through the v2 compaction path", () => {
+    assert.equal(flavor.compaction, "marker");
+  });
+
   it("routes interaction_* permission requests to the question card", () => {
     const question = flavor.extractPermissionQuestion?.(
       permissionRequest("interaction_1", [
