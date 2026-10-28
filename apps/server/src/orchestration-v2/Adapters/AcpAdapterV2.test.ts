@@ -350,7 +350,7 @@ const makeInstructionCompactionHarness = Effect.fnUntraced(function* (
     flavor: {
       driver: ACP_TEST_DRIVER,
       capabilities: AcpProviderCapabilitiesV2,
-      supportsCompaction: true,
+      compaction: "marker",
       makeRuntime: makeMockRuntime({
         childProcessSpawner,
         mockAgentPath,

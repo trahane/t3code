@@ -46,6 +46,17 @@ export function materializeReplayTranscriptRuntimeInstructions(
         Array.isArray(frame.params.prompt)
       ) {
         const prompt: ReadonlyArray<unknown> = frame.params.prompt;
+        const firstPart = prompt[0];
+        if (
+          (runtime.driver === "grok" || runtime.driver === "acpRegistry") &&
+          typeof firstPart === "object" &&
+          firstPart !== null &&
+          "text" in firstPart &&
+          typeof firstPart.text === "string" &&
+          firstPart.text.trimStart().startsWith("/")
+        ) {
+          return entry;
+        }
         const lastPart = prompt.at(-1);
         if (
           typeof lastPart === "object" &&
